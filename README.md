@@ -54,6 +54,137 @@ This version embeds `ptx_inject.h`, `stack_ptx.h`, and the kernel generator. The
 - For each `i`, the kernel loads an input vector from `data` and runs the
   injected PTX to produce `embed_dims` outputs.
 
+## Inject site example
+
+One stack-ptx instruction list that produces the injected stub below (input 0
+is x0, input 1 is x1; output pops are y0 then y1; looks like:
+
+```c
+static const StackPtxInstruction kExampleProgram[] = {
+    stack_ptx_encode_input(1),
+    stack_ptx_encode_ptx_instruction_abs_ftz_f32,
+    stack_ptx_encode_ptx_instruction_ex2_approx_ftz_f32,
+    stack_ptx_encode_constant_f32(-6.126209259f),
+    stack_ptx_encode_ptx_instruction_abs_ftz_f32,
+    stack_ptx_encode_input(1),
+    stack_ptx_encode_constant_f32(4.942284107f),
+    stack_ptx_encode_ptx_instruction_tanh_approx_f32,
+    stack_ptx_encode_input(1),
+    stack_ptx_encode_ptx_instruction_add_ftz_f32,
+    stack_ptx_encode_ptx_instruction_sqrt_approx_ftz_f32,
+    stack_ptx_encode_ptx_instruction_div_approx_ftz_f32,
+    stack_ptx_encode_ptx_instruction_cos_approx_ftz_f32,
+    stack_ptx_encode_constant_f32(1.441460252f),
+    stack_ptx_encode_ptx_instruction_abs_ftz_f32,
+    stack_ptx_encode_meta_swap(STACK_PTX_STACK_TYPE_F32),
+    stack_ptx_encode_constant_f32(3.308667660f),
+    stack_ptx_encode_ptx_instruction_fma_rn_ftz_f32,
+    stack_ptx_encode_meta_swap(STACK_PTX_STACK_TYPE_F32),
+    stack_ptx_encode_ptx_instruction_div_approx_ftz_f32,
+    stack_ptx_encode_ptx_instruction_abs_ftz_f32,
+    stack_ptx_encode_constant_f32(-2.771166325f),
+    stack_ptx_encode_meta_swap(STACK_PTX_STACK_TYPE_F32),
+    stack_ptx_encode_ptx_instruction_sub_ftz_f32,
+    stack_ptx_encode_constant_f32(4.709908485f),
+    stack_ptx_encode_ptx_instruction_rcp_approx_ftz_f32,
+    stack_ptx_encode_meta_swap(STACK_PTX_STACK_TYPE_F32),
+    stack_ptx_encode_ptx_instruction_max_ftz_f32,
+    stack_ptx_encode_meta_swap(STACK_PTX_STACK_TYPE_F32),
+    stack_ptx_encode_ptx_instruction_copysign_f32,
+    stack_ptx_encode_input(1),
+    stack_ptx_encode_ptx_instruction_ex2_approx_ftz_f32,
+    stack_ptx_encode_meta_swap(STACK_PTX_STACK_TYPE_F32),
+    stack_ptx_encode_ptx_instruction_div_approx_ftz_f32,
+    stack_ptx_encode_input(0),
+    stack_ptx_encode_meta_swap(STACK_PTX_STACK_TYPE_F32),
+    stack_ptx_encode_ptx_instruction_sub_ftz_f32,
+    stack_ptx_encode_constant_f32(-5.611264706f),
+    stack_ptx_encode_return
+};
+```
+
+The kernel PTX contains inline-asm markers (`PTX_INJECT_START`/`PTX_INJECT_END`)
+that `ptx_inject` replaces with the compiled stack-ptx stub. For example, a
+site like:
+
+```ptx
+$L__BB0_22:
+	// begin inline asm
+	{
+	.reg .f32 %_x0;
+	.reg .f32 %_x1;
+	.reg .f32 %_x2;
+	.reg .f32 %_x3;
+	.reg .f32 %_x4;
+	.reg .f32 %_x5;
+	mov.f32 %_x4, %f5;
+	mov.f32 %_x5, %f6;
+	// PTX_INJECT_START func_9
+	// _x0 o f32 F32 y0
+	// _x1 o f32 F32 y1
+	// _x2 o f32 F32 y2
+	// _x3 o f32 F32 y3
+	// _x4 i f32 F32 x0
+	// _x5 i f32 F32 x1
+	// PTX_INJECT_END
+	mov.f32 %f652, %_x0;
+	mov.f32 %f653, %_x1;
+	mov.f32 %f654, %_x2;
+	mov.f32 %f655, %_x3;
+	}
+	// end inline asm
+	mov.u64 	%rd106, 9;
+	bra.uni 	$L__BB0_159;
+```
+
+gets injected as something like:
+
+```ptx
+$L__BB0_22:
+	// begin inline asm
+	{
+	.reg .f32 %_x0;
+	.reg .f32 %_x1;
+	.reg .f32 %_x2;
+	.reg .f32 %_x3;
+	.reg .f32 %_x4;
+	.reg .f32 %_x5;
+	mov.f32 %_x4, %f5;
+	mov.f32 %_x5, %f6;
+	{
+	.reg .f32 %_a<19>;
+	abs.ftz.f32 %_a0, %_x5;
+	ex2.approx.ftz.f32 %_a1, %_a0;
+	abs.ftz.f32 %_a2, 0fC0C409E8;
+	tanh.approx.f32 %_a3, 0f409E2731;
+	add.ftz.f32 %_a4, %_x5, %_a3;
+	sqrt.approx.ftz.f32 %_a5, %_a4;
+	div.approx.ftz.f32 %_a6, %_a5, %_x5;
+	cos.approx.ftz.f32 %_a7, %_a6;
+	abs.ftz.f32 %_a8, 0f3FB881C5;
+	fma.rn.ftz.f32 %_a9, 0f4053C136, %_a7, %_a8;
+	div.approx.ftz.f32 %_a10, %_a2, %_a9;
+	abs.ftz.f32 %_a11, %_a10;
+	sub.ftz.f32 %_a12, %_a11, 0fC0315ACA;
+	rcp.approx.ftz.f32 %_a13, 0f4096B792;
+	max.ftz.f32 %_a14, %_a12, %_a13;
+	copysign.f32 %_a15, %_a1, %_a14;
+	ex2.approx.ftz.f32 %_a16, %_x5;
+	div.approx.ftz.f32 %_a17, %_a15, %_a16;
+	sub.ftz.f32 %_a18, %_a17, %_x4;
+	mov.f32 %_x0, 0fC0B38F7B;
+	mov.f32 %_x1, %_a18;
+	}
+	mov.f32 %f652, %_x0;
+	mov.f32 %f653, %_x1;
+	mov.f32 %f654, %_x2;
+	mov.f32 %f655, %_x3;
+	}
+	// end inline asm
+	mov.u64 	%rd106, 9;
+	bra.uni 	$L__BB0_159;
+```
+
 ## Tensor layout
 
 Inputs are passed as:
