@@ -1,0 +1,3 @@
+build
+*.o
+stack_ptx_ptx_inject_bench
